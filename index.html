@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AR Face Filter - Yoshi</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
     <style>
         * {
             margin: 0;
@@ -124,6 +126,10 @@
             background: rgba(0, 255, 0, 0.1);
             border-radius: 8px;
             word-break: break-all;
+            min-height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         
         .error {
@@ -160,75 +166,92 @@
         <div class="status" id="status">Ready</div>
     </div>
 
-    <script async src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-    <script async src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-    <script async src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/face_detection.js"></script>
-
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         
-        let camera = null;
-        let faceDetection = null;
-        let currentFilter = 'test';
-        let detections = [];
+        let model = null;
         let isRunning = false;
+        let currentFilter = 'test';
+        
+        async function loadModel() {
+            log('Loading COCO-SSD model...');
+            model = await cocoSsd.load();
+            log('✅ Model loaded!');
+        }
         
         function log(msg) {
             console.log('[YOSHI]', msg);
             document.getElementById('status').textContent = msg;
         }
         
-        async function initializeFaceDetection() {
-            log('Initializing face detection...');
-            
-            faceDetection = new FaceDetection({
-                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`
-            });
-            
-            faceDetection.setOptions({ model: 'short_range' });
-            faceDetection.onResults(onFaceDetectionResults);
-            
-            log('Face detection ready!');
-        }
-        
-        function onFaceDetectionResults(results) {
-            detections = results.detections || [];
-            if (detections.length > 0) {
-                log(`Detected ${detections.length} face(s) | Filter: ${currentFilter}`);
+        async function startCamera() {
+            try {
+                log('Requesting camera...');
+                
+                if (!model) {
+                    await loadModel();
+                }
+                
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { 
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        facingMode: 'user'
+                    }
+                });
+                
+                video.srcObject = stream;
+                
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    log(`✅ Camera started (${canvas.width}x${canvas.height})`);
+                    isRunning = true;
+                    detectAndDraw();
+                };
+                
+            } catch (e) {
+                log('❌ ' + e.message);
             }
         }
         
-        function drawFrame() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        async function detectAndDraw() {
+            if (!isRunning) return;
             
-            // Draw canvas size debug
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-            ctx.fillText(`Canvas: ${canvas.width}x${canvas.height}`, 10, 20);
-            
-            if (detections.length === 0) return;
-            
-            detections.forEach((detection, idx) => {
-                const box = detection.boundingBox;
-                const x = box.originX * canvas.width;
-                const y = box.originY * canvas.height;
-                const w = box.width * canvas.width;
-                const h = box.height * canvas.height;
+            try {
+                const predictions = await model.detect(video);
                 
-                applyFilter(x, y, w, h, idx);
-            });
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Filter for person class (id 0) and face-like detections
+                const faces = predictions.filter(p => 
+                    (p.class === 'person' && p.score > 0.5) ||
+                    (p.bbox[3] > p.bbox[2] * 0.7 && p.bbox[3] < p.bbox[2] * 1.3)
+                );
+                
+                if (faces.length > 0) {
+                    log(`✅ Detected ${faces.length} face(s) | Filter: ${currentFilter}`);
+                    
+                    faces.forEach(face => {
+                        const [x, y, w, h] = face.bbox;
+                        applyFilter(x, y, w, h);
+                    });
+                }
+            } catch (e) {
+                console.error('Detection error:', e);
+            }
             
-            if (isRunning) requestAnimationFrame(drawFrame);
+            requestAnimationFrame(detectAndDraw);
         }
         
-        function applyFilter(x, y, w, h, idx) {
+        function applyFilter(x, y, w, h) {
             const cx = x + w / 2;
             const cy = y + h / 2;
             
             switch(currentFilter) {
                 case 'test':
-                    // Bright red box - always visible
                     ctx.strokeStyle = '#FF0000';
                     ctx.lineWidth = 4;
                     ctx.strokeRect(x, y, w, h);
@@ -237,17 +260,17 @@
                     break;
                     
                 case 'emoji':
-                    ctx.font = Math.floor(w * 0.7) + 'px Arial';
+                    ctx.font = Math.floor(w * 0.6) + 'px Arial';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
                     ctx.fillText('😊', cx, cy);
                     break;
                     
                 case 'heart':
-                    ctx.font = Math.floor(w * 0.4) + 'px Arial';
+                    ctx.font = Math.floor(w * 0.35) + 'px Arial';
                     for (let i = 0; i < 6; i++) {
                         const angle = (i / 6) * Math.PI * 2;
-                        const dist = w * 0.5;
+                        const dist = w * 0.45;
                         const hx = cx + Math.cos(angle) * dist;
                         const hy = cy + Math.sin(angle) * dist;
                         ctx.fillText('❤️', hx, hy);
@@ -273,56 +296,9 @@
             }
         }
         
-        async function startCamera() {
-            try {
-                log('Requesting camera permission...');
-                
-                await initializeFaceDetection();
-                
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { 
-                        width: { ideal: 640 },
-                        height: { ideal: 480 },
-                        facingMode: 'user'
-                    }
-                });
-                
-                video.srcObject = stream;
-                
-                video.onloadedmetadata = () => {
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    log(`✅ Camera started (${canvas.width}x${canvas.height})`);
-                };
-                
-                setTimeout(() => {
-                    if (canvas.width === 0) {
-                        canvas.width = 640;
-                        canvas.height = 480;
-                    }
-                    
-                    camera = new Camera(video, {
-                        onFrame: async () => {
-                            await faceDetection.send({ image: video });
-                        },
-                        width: canvas.width,
-                        height: canvas.height
-                    });
-                    
-                    camera.start();
-                    isRunning = true;
-                    drawFrame();
-                }, 500);
-                
-            } catch (e) {
-                log('❌ Error: ' + e.message, true);
-            }
-        }
-        
         function stopCamera() {
-            if (camera) {
-                camera.stop();
-                isRunning = false;
+            isRunning = false;
+            if (video.srcObject) {
                 video.srcObject.getTracks().forEach(t => t.stop());
                 log('⏹️ Camera stopped');
             }
