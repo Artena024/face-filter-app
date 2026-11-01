@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Face Filter - Yoshi</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 800px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        
+        h1 {
+            color: #fff;
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 2.5em;
+        }
+        
+        .video-container {
+            position: relative;
+            width: 100%;
+            background: #000;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        
+        video, canvas {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        button {
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        .filter-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .filter-btn {
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.3s ease;
+        }
+        
+        .filter-btn:hover {
+            background: rgba(102, 126, 234, 0.5);
+            border-color: rgba(102, 126, 234, 1);
+        }
+        
+        .filter-btn.active {
+            background: rgba(102, 126, 234, 1);
+            border-color: rgba(102, 126, 234, 1);
+            box-shadow: 0 0 15px rgba(102, 126, 234, 0.6);
+        }
+        
+        .status {
+            color: #0f0;
+            text-align: center;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        
+        .error {
+            color: #f00;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🐢 AR Face Filter</h1>
+        
+        <div class="video-container">
+            <video id="video" autoplay playsinline></video>
+            <canvas id="canvas"></canvas>
+        </div>
+        
+        <div class="controls">
+            <button onclick="startCamera()">📷 Start Camera</button>
+            <button onclick="stopCamera()">⏹️ Stop</button>
+            <button onclick="captureImage()">📸 Capture</button>
+            <button onclick="recordVideo()">🎥 Record</button>
+            <button onclick="stopRecording()" style="display:none;" id="stopRecordBtn">⏹️ Stop Record</button>
+        </div>
+        
+        <h3 style="color: #fff; margin-bottom: 10px;">Filters</h3>
+        <div class="filter-grid">
+            <button class="filter-btn active" onclick="setFilter('none')">None</button>
+            <button class="filter-btn" onclick="setFilter('emoji')">😊 Emoji</button>
+            <button class="filter-btn" onclick="setFilter('heart')">❤️ Hearts</button>
+            <button class="filter-btn" onclick="setFilter('stars')">⭐ Stars</button>
+            <button class="filter-btn" onclick="setFilter('blur')">🌫️ Blur</button>
+            <button class="filter-btn" onclick="setFilter('beauty')">✨ Beauty</button>
+        </div>
+        
+        <div class="status" id="status">Ready</div>
+    </div>
+
+    <script async src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/face_detection.js"></script>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let camera = null;
+        let faceDetection = null;
+        let currentFilter = 'none';
+        let isRecording = false;
+        let mediaRecorder = null;
+        
+        async function initializeFaceDetection() {
+            faceDetection = new FaceDetection({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`
+            });
+            
+            faceDetection.setOptions({
+                model: 'short_range'
+            });
+            
+            faceDetection.onResults(onFaceDetectionResults);
+        }
+        
+        function onFaceDetectionResults(results) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (results.detections && results.detections.length > 0) {
+                results.detections.forEach(detection => {
+                    const box = detection.boundingBox;
+                    const start = box.originX * canvas.width;
+                    const top = box.originY * canvas.height;
+                    const width = box.width * canvas.width;
+                    const height = box.height * canvas.height;
+                    
+                    applyFilter(start, top, width, height, detection);
+                });
+            }
+        }
+        
+        function applyFilter(x, y, w, h, detection) {
+            const centerX = x + w / 2;
+            const centerY = y + h / 2;
+            
+            switch(currentFilter) {
+                case 'emoji':
+                    ctx.font = Math.floor(w * 0.8) + 'px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('😊', centerX, centerY);
+                    break;
+                    
+                case 'heart':
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.6)';
+                    for (let i = 0; i < 3; i++) {
+                        ctx.beginPath();
+                        const offsetX = (Math.random() - 0.5) * w * 1.5;
+                        const offsetY = (Math.random() - 0.5) * h * 1.5;
+                        ctx.font = Math.floor(w * 0.4) + 'px Arial';
+                        ctx.fillText('❤️', centerX + offsetX, centerY + offsetY);
+                    }
+                    break;
+                    
+                case 'stars':
+                    for (let i = 0; i < 4; i++) {
+                        ctx.font = Math.floor(w * 0.35) + 'px Arial';
+                        const angle = (i / 4) * Math.PI * 2;
+                        const radius = w * 0.5;
+                        const starX = centerX + Math.cos(angle) * radius;
+                        const starY = centerY + Math.sin(angle) * radius;
+                        ctx.fillText('⭐', starX, starY);
+                    }
+                    break;
+                    
+                case 'blur':
+                    ctx.fillStyle = 'rgba(100, 100, 255, 0.3)';
+                    ctx.fillRect(x, y, w, h);
+                    ctx.strokeStyle = 'rgba(100, 150, 255, 0.7)';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, w, h);
+                    break;
+                    
+                case 'beauty':
+                    ctx.strokeStyle = 'rgba(255, 200, 100, 0.8)';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(x - 5, y - 5, w + 10, h + 10);
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                    ctx.fillRect(x, y, w, h);
+                    break;
+            }
+        }
+        
+        async function startCamera() {
+            try {
+                await initializeFaceDetection();
+                
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480 }
+                });
+                
+                video.srcObject = stream;
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+                
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                };
+                
+                camera = new Camera(video, {
+                    onFrame: async () => {
+                        await faceDetection.send({ image: video });
+                    },
+                    width: 640,
+                    height: 480
+                });
+                
+                camera.start();
+                document.getElementById('status').textContent = '✅ Camera Started';
+            } catch (e) {
+                document.getElementById('status').textContent = '❌ ' + e.message;
+                document.getElementById('status').classList.add('error');
+            }
+        }
+        
+        function stopCamera() {
+            if (camera) {
+                camera.stop();
+                video.srcObject.getTracks().forEach(track => track.stop());
+                document.getElementById('status').textContent = '⏹️ Camera Stopped';
+            }
+        }
+        
+        function setFilter(filter) {
+            currentFilter = filter;
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+        }
+        
+        function captureImage() {
+            const link = document.createElement('a');
+            link.href = canvas.toDataURL('image/png');
+            link.download = 'face-filter-' + Date.now() + '.png';
+            link.click();
+            document.getElementById('status').textContent = '📸 Image Downloaded';
+        }
+        
+        function recordVideo() {
+            if (!isRecording) {
+                const stream = canvas.captureStream(30);
+                mediaRecorder = new MediaRecorder(stream);
+                const chunks = [];
+                
+                mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'video/mp4' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'face-filter-' + Date.now() + '.mp4';
+                    a.click();
+                };
+                
+                mediaRecorder.start();
+                isRecording = true;
+                document.getElementById('stopRecordBtn').style.display = 'inline-block';
+                document.getElementById('status').textContent = '🎥 Recording...';
+            }
+        }
+        
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                isRecording = false;
+                document.getElementById('stopRecordBtn').style.display = 'none';
+                document.getElementById('status').textContent = '✅ Video Downloaded';
+            }
+        }
+    </script>
+</body>
+</html>
