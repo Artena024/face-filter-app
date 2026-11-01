@@ -40,27 +40,32 @@
         .video-container {
             position: relative;
             width: 100%;
+            max-width: 640px;
+            margin: 0 auto 20px;
             background: #000;
             border-radius: 15px;
             overflow: hidden;
-            margin-bottom: 20px;
+            aspect-ratio: 4 / 3;
         }
         
-        video, canvas {
+        #video {
             width: 100%;
-            height: auto;
+            height: 100%;
+            object-fit: cover;
             display: block;
         }
         
-        canvas {
+        #canvas {
             position: absolute;
             top: 0;
             left: 0;
+            width: 100%;
+            height: 100%;
         }
         
         .controls {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            grid-template-columns: repeat(2, 1fr);
             gap: 10px;
             margin-bottom: 20px;
         }
@@ -82,13 +87,9 @@
             box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
         }
         
-        button:active {
-            transform: translateY(0);
-        }
-        
         .filter-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+            grid-template-columns: repeat(3, 1fr);
             gap: 10px;
             margin-bottom: 20px;
         }
@@ -119,11 +120,15 @@
             color: #0f0;
             text-align: center;
             font-size: 12px;
-            margin-top: 10px;
+            padding: 10px;
+            background: rgba(0, 255, 0, 0.1);
+            border-radius: 8px;
+            word-break: break-all;
         }
         
         .error {
             color: #f00;
+            background: rgba(255, 0, 0, 0.1);
         }
     </style>
 </head>
@@ -132,26 +137,24 @@
         <h1>🐢 AR Face Filter</h1>
         
         <div class="video-container">
-            <video id="video" autoplay playsinline></video>
+            <video id="video" autoplay playsinline muted></video>
             <canvas id="canvas"></canvas>
         </div>
         
         <div class="controls">
-            <button onclick="startCamera()">📷 Start Camera</button>
+            <button onclick="startCamera()">📷 Start</button>
             <button onclick="stopCamera()">⏹️ Stop</button>
-            <button onclick="captureImage()">📸 Capture</button>
-            <button onclick="recordVideo()">🎥 Record</button>
-            <button onclick="stopRecording()" style="display:none;" id="stopRecordBtn">⏹️ Stop Record</button>
+            <button onclick="captureImage()">📸 Snap</button>
         </div>
         
         <h3 style="color: #fff; margin-bottom: 10px;">Filters</h3>
         <div class="filter-grid">
-            <button class="filter-btn active" onclick="setFilter('none')">None</button>
+            <button class="filter-btn active" onclick="setFilter('test')">🔴 Test</button>
             <button class="filter-btn" onclick="setFilter('emoji')">😊 Emoji</button>
             <button class="filter-btn" onclick="setFilter('heart')">❤️ Hearts</button>
-            <button class="filter-btn" onclick="setFilter('stars')">⭐ Stars</button>
             <button class="filter-btn" onclick="setFilter('blur')">🌫️ Blur</button>
-            <button class="filter-btn" onclick="setFilter('beauty')">✨ Beauty</button>
+            <button class="filter-btn" onclick="setFilter('glow')">✨ Glow</button>
+            <button class="filter-btn" onclick="setFilter('none')">None</button>
         </div>
         
         <div class="status" id="status">Ready</div>
@@ -165,148 +168,171 @@
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
+        
         let camera = null;
         let faceDetection = null;
-        let currentFilter = 'none';
-        let isRecording = false;
-        let mediaRecorder = null;
+        let currentFilter = 'test';
         let detections = [];
-        let animationId = null;
+        let isRunning = false;
+        
+        function log(msg) {
+            console.log('[YOSHI]', msg);
+            document.getElementById('status').textContent = msg;
+        }
         
         async function initializeFaceDetection() {
+            log('Initializing face detection...');
+            
             faceDetection = new FaceDetection({
                 locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`
             });
             
-            faceDetection.setOptions({
-                model: 'short_range'
-            });
-            
+            faceDetection.setOptions({ model: 'short_range' });
             faceDetection.onResults(onFaceDetectionResults);
+            
+            log('Face detection ready!');
         }
         
         function onFaceDetectionResults(results) {
             detections = results.detections || [];
+            if (detections.length > 0) {
+                log(`Detected ${detections.length} face(s) | Filter: ${currentFilter}`);
+            }
         }
         
-        function renderFrame() {
+        function drawFrame() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            if (detections.length > 0 && currentFilter !== 'none') {
-                detections.forEach(detection => {
-                    const box = detection.boundingBox;
-                    const x = box.originX * canvas.width;
-                    const y = box.originY * canvas.height;
-                    const w = box.width * canvas.width;
-                    const h = box.height * canvas.height;
-                    
-                    applyFilter(x, y, w, h, detection);
-                });
-            }
+            // Draw canvas size debug
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.fillText(`Canvas: ${canvas.width}x${canvas.height}`, 10, 20);
             
-            animationId = requestAnimationFrame(renderFrame);
+            if (detections.length === 0) return;
+            
+            detections.forEach((detection, idx) => {
+                const box = detection.boundingBox;
+                const x = box.originX * canvas.width;
+                const y = box.originY * canvas.height;
+                const w = box.width * canvas.width;
+                const h = box.height * canvas.height;
+                
+                applyFilter(x, y, w, h, idx);
+            });
+            
+            if (isRunning) requestAnimationFrame(drawFrame);
         }
         
-        function applyFilter(x, y, w, h, detection) {
-            const centerX = x + w / 2;
-            const centerY = y + h / 2;
+        function applyFilter(x, y, w, h, idx) {
+            const cx = x + w / 2;
+            const cy = y + h / 2;
             
             switch(currentFilter) {
+                case 'test':
+                    // Bright red box - always visible
+                    ctx.strokeStyle = '#FF0000';
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(x, y, w, h);
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+                    ctx.fillRect(x, y, w, h);
+                    break;
+                    
                 case 'emoji':
-                    ctx.font = Math.floor(w * 0.8) + 'px Arial';
+                    ctx.font = Math.floor(w * 0.7) + 'px Arial';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillText('😊', centerX, centerY);
+                    ctx.fillText('😊', cx, cy);
                     break;
                     
                 case 'heart':
-                    ctx.fillStyle = 'rgba(255, 0, 0, 0.6)';
-                    for (let i = 0; i < 3; i++) {
-                        ctx.beginPath();
-                        const offsetX = (Math.random() - 0.5) * w * 1.5;
-                        const offsetY = (Math.random() - 0.5) * h * 1.5;
-                        ctx.font = Math.floor(w * 0.4) + 'px Arial';
-                        ctx.fillText('❤️', centerX + offsetX, centerY + offsetY);
-                    }
-                    break;
-                    
-                case 'stars':
-                    for (let i = 0; i < 4; i++) {
-                        ctx.font = Math.floor(w * 0.35) + 'px Arial';
-                        const angle = (i / 4) * Math.PI * 2;
-                        const radius = w * 0.5;
-                        const starX = centerX + Math.cos(angle) * radius;
-                        const starY = centerY + Math.sin(angle) * radius;
-                        ctx.fillText('⭐', starX, starY);
+                    ctx.font = Math.floor(w * 0.4) + 'px Arial';
+                    for (let i = 0; i < 6; i++) {
+                        const angle = (i / 6) * Math.PI * 2;
+                        const dist = w * 0.5;
+                        const hx = cx + Math.cos(angle) * dist;
+                        const hy = cy + Math.sin(angle) * dist;
+                        ctx.fillText('❤️', hx, hy);
                     }
                     break;
                     
                 case 'blur':
-                    ctx.fillStyle = 'rgba(100, 100, 255, 0.3)';
-                    ctx.fillRect(x, y, w, h);
-                    ctx.strokeStyle = 'rgba(100, 150, 255, 0.7)';
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(x, y, w, h);
-                    break;
-                    
-                case 'beauty':
-                    ctx.strokeStyle = 'rgba(255, 200, 100, 0.8)';
+                    ctx.strokeStyle = 'rgba(100, 150, 255, 0.8)';
                     ctx.lineWidth = 3;
                     ctx.strokeRect(x - 5, y - 5, w + 10, h + 10);
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                    ctx.fillStyle = 'rgba(100, 150, 255, 0.2)';
                     ctx.fillRect(x, y, w, h);
+                    break;
+                    
+                case 'glow':
+                    ctx.strokeStyle = 'rgba(255, 100, 200, 0.8)';
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(x - 10, y - 10, w + 20, h + 20);
+                    ctx.strokeStyle = 'rgba(255, 100, 200, 0.4)';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x - 15, y - 15, w + 30, h + 30);
                     break;
             }
         }
         
         async function startCamera() {
             try {
+                log('Requesting camera permission...');
+                
                 await initializeFaceDetection();
                 
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { width: 640, height: 480 }
+                    video: { 
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        facingMode: 'user'
+                    }
                 });
                 
                 video.srcObject = stream;
-                canvas.width = video.videoWidth || 640;
-                canvas.height = video.videoHeight || 480;
                 
                 video.onloadedmetadata = () => {
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
+                    log(`✅ Camera started (${canvas.width}x${canvas.height})`);
                 };
                 
-                camera = new Camera(video, {
-                    onFrame: async () => {
-                        await faceDetection.send({ image: video });
-                    },
-                    width: 640,
-                    height: 480
-                });
+                setTimeout(() => {
+                    if (canvas.width === 0) {
+                        canvas.width = 640;
+                        canvas.height = 480;
+                    }
+                    
+                    camera = new Camera(video, {
+                        onFrame: async () => {
+                            await faceDetection.send({ image: video });
+                        },
+                        width: canvas.width,
+                        height: canvas.height
+                    });
+                    
+                    camera.start();
+                    isRunning = true;
+                    drawFrame();
+                }, 500);
                 
-                camera.start();
-                renderFrame();
-                document.getElementById('status').textContent = '✅ Camera Started';
             } catch (e) {
-                document.getElementById('status').textContent = '❌ ' + e.message;
-                document.getElementById('status').classList.add('error');
+                log('❌ Error: ' + e.message, true);
             }
         }
         
         function stopCamera() {
             if (camera) {
                 camera.stop();
-                video.srcObject.getTracks().forEach(track => track.stop());
-                document.getElementById('status').textContent = '⏹️ Camera Stopped';
+                isRunning = false;
+                video.srcObject.getTracks().forEach(t => t.stop());
+                log('⏹️ Camera stopped');
             }
         }
         
-        function setFilter(filter) {
-            currentFilter = filter;
-            document.querySelectorAll('.filter-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
+        function setFilter(f) {
+            currentFilter = f;
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             event.target.classList.add('active');
+            log('Filter: ' + f);
         }
         
         function captureImage() {
@@ -314,39 +340,6 @@
             link.href = canvas.toDataURL('image/png');
             link.download = 'face-filter-' + Date.now() + '.png';
             link.click();
-            document.getElementById('status').textContent = '📸 Image Downloaded';
-        }
-        
-        function recordVideo() {
-            if (!isRecording) {
-                const stream = canvas.captureStream(30);
-                mediaRecorder = new MediaRecorder(stream);
-                const chunks = [];
-                
-                mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
-                mediaRecorder.onstop = () => {
-                    const blob = new Blob(chunks, { type: 'video/mp4' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = 'face-filter-' + Date.now() + '.mp4';
-                    a.click();
-                };
-                
-                mediaRecorder.start();
-                isRecording = true;
-                document.getElementById('stopRecordBtn').style.display = 'inline-block';
-                document.getElementById('status').textContent = '🎥 Recording...';
-            }
-        }
-        
-        function stopRecording() {
-            if (mediaRecorder && isRecording) {
-                mediaRecorder.stop();
-                isRecording = false;
-                document.getElementById('stopRecordBtn').style.display = 'none';
-                document.getElementById('status').textContent = '✅ Video Downloaded';
-            }
         }
     </script>
 </body>
