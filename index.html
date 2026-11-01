@@ -4,8 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AR Face Filter - Yoshi</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
     <style>
         * {
             margin: 0;
@@ -125,16 +123,6 @@
             padding: 10px;
             background: rgba(0, 255, 0, 0.1);
             border-radius: 8px;
-            word-break: break-all;
-            min-height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .error {
-            color: #f00;
-            background: rgba(255, 0, 0, 0.1);
         }
     </style>
 </head>
@@ -155,15 +143,15 @@
         
         <h3 style="color: #fff; margin-bottom: 10px;">Filters</h3>
         <div class="filter-grid">
-            <button class="filter-btn active" onclick="setFilter('test')">🔴 Test</button>
-            <button class="filter-btn" onclick="setFilter('emoji')">😊 Emoji</button>
-            <button class="filter-btn" onclick="setFilter('heart')">❤️ Hearts</button>
-            <button class="filter-btn" onclick="setFilter('blur')">🌫️ Blur</button>
-            <button class="filter-btn" onclick="setFilter('glow')">✨ Glow</button>
+            <button class="filter-btn active" onclick="setFilter('rainbow')">🌈 Rainbow</button>
+            <button class="filter-btn" onclick="setFilter('pixelate')">🟫 Pixelate</button>
+            <button class="filter-btn" onclick="setFilter('mirror')">🪞 Mirror</button>
+            <button class="filter-btn" onclick="setFilter('noir')">🖤 Noir</button>
+            <button class="filter-btn" onclick="setFilter('invert')">⚫ Invert</button>
             <button class="filter-btn" onclick="setFilter('none')">None</button>
         </div>
         
-        <div class="status" id="status">Ready</div>
+        <div class="status" id="status">Ready ✅</div>
     </div>
 
     <script>
@@ -171,29 +159,12 @@
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         
-        let model = null;
         let isRunning = false;
-        let currentFilter = 'test';
-        
-        async function loadModel() {
-            log('Loading COCO-SSD model...');
-            model = await cocoSsd.load();
-            log('✅ Model loaded!');
-        }
-        
-        function log(msg) {
-            console.log('[YOSHI]', msg);
-            document.getElementById('status').textContent = msg;
-        }
+        let currentFilter = 'rainbow';
+        let time = 0;
         
         async function startCamera() {
             try {
-                log('Requesting camera...');
-                
-                if (!model) {
-                    await loadModel();
-                }
-                
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { 
                         width: { ideal: 640 },
@@ -203,104 +174,135 @@
                 });
                 
                 video.srcObject = stream;
-                
                 video.onloadedmetadata = () => {
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
-                    log(`✅ Camera started (${canvas.width}x${canvas.height})`);
+                    document.getElementById('status').textContent = `✅ Camera Started (${canvas.width}x${canvas.height})`;
                     isRunning = true;
-                    detectAndDraw();
+                    applyEffects();
                 };
-                
             } catch (e) {
-                log('❌ ' + e.message);
+                document.getElementById('status').textContent = '❌ ' + e.message;
             }
         }
         
-        async function detectAndDraw() {
+        function applyEffects() {
             if (!isRunning) return;
             
-            try {
-                const predictions = await model.detect(video);
-                
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                
-                // Filter for person class (id 0) and face-like detections
-                const faces = predictions.filter(p => 
-                    (p.class === 'person' && p.score > 0.5) ||
-                    (p.bbox[3] > p.bbox[2] * 0.7 && p.bbox[3] < p.bbox[2] * 1.3)
-                );
-                
-                if (faces.length > 0) {
-                    log(`✅ Detected ${faces.length} face(s) | Filter: ${currentFilter}`);
-                    
-                    faces.forEach(face => {
-                        const [x, y, w, h] = face.bbox;
-                        applyFilter(x, y, w, h);
-                    });
-                }
-            } catch (e) {
-                console.error('Detection error:', e);
-            }
+            // Draw video
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             
-            requestAnimationFrame(detectAndDraw);
-        }
-        
-        function applyFilter(x, y, w, h) {
-            const cx = x + w / 2;
-            const cy = y + h / 2;
+            // Get image data
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
             
             switch(currentFilter) {
-                case 'test':
-                    ctx.strokeStyle = '#FF0000';
-                    ctx.lineWidth = 4;
-                    ctx.strokeRect(x, y, w, h);
-                    ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
-                    ctx.fillRect(x, y, w, h);
+                case 'rainbow':
+                    applyRainbow(data);
                     break;
-                    
-                case 'emoji':
-                    ctx.font = Math.floor(w * 0.6) + 'px Arial';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText('😊', cx, cy);
+                case 'pixelate':
+                    applyPixelate();
                     break;
-                    
-                case 'heart':
-                    ctx.font = Math.floor(w * 0.35) + 'px Arial';
-                    for (let i = 0; i < 6; i++) {
-                        const angle = (i / 6) * Math.PI * 2;
-                        const dist = w * 0.45;
-                        const hx = cx + Math.cos(angle) * dist;
-                        const hy = cy + Math.sin(angle) * dist;
-                        ctx.fillText('❤️', hx, hy);
-                    }
+                case 'mirror':
+                    applyMirror();
                     break;
-                    
-                case 'blur':
-                    ctx.strokeStyle = 'rgba(100, 150, 255, 0.8)';
-                    ctx.lineWidth = 3;
-                    ctx.strokeRect(x - 5, y - 5, w + 10, h + 10);
-                    ctx.fillStyle = 'rgba(100, 150, 255, 0.2)';
-                    ctx.fillRect(x, y, w, h);
+                case 'noir':
+                    applyNoir(data);
                     break;
-                    
-                case 'glow':
-                    ctx.strokeStyle = 'rgba(255, 100, 200, 0.8)';
-                    ctx.lineWidth = 4;
-                    ctx.strokeRect(x - 10, y - 10, w + 20, h + 20);
-                    ctx.strokeStyle = 'rgba(255, 100, 200, 0.4)';
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(x - 15, y - 15, w + 30, h + 30);
+                case 'invert':
+                    applyInvert(data);
                     break;
             }
+            
+            if (currentFilter !== 'mirror' && currentFilter !== 'none') {
+                ctx.putImageData(imageData, 0, 0);
+            }
+            
+            time++;
+            requestAnimationFrame(applyEffects);
+        }
+        
+        function applyRainbow(data) {
+            for (let i = 0; i < data.length; i += 4) {
+                const hue = (time * 2 + (i / data.length) * 360) % 360;
+                const [r, g, b] = hslToRgb(hue, 100, 50);
+                
+                const origR = data[i];
+                const origG = data[i + 1];
+                const origB = data[i + 2];
+                
+                data[i] = origR * 0.6 + r * 0.4;
+                data[i + 1] = origG * 0.6 + g * 0.4;
+                data[i + 2] = origB * 0.6 + b * 0.4;
+            }
+        }
+        
+        function applyPixelate() {
+            const pixelSize = 10;
+            const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            
+            for (let y = 0; y < canvas.height; y += pixelSize) {
+                for (let x = 0; x < canvas.width; x += pixelSize) {
+                    const pixelData = ctx.getImageData(x, y, pixelSize, pixelSize);
+                    const d = pixelData.data;
+                    
+                    let r = 0, g = 0, b = 0;
+                    for (let i = 0; i < d.length; i += 4) {
+                        r += d[i];
+                        g += d[i + 1];
+                        b += d[i + 2];
+                    }
+                    
+                    const count = d.length / 4;
+                    ctx.fillStyle = `rgb(${Math.floor(r/count)}, ${Math.floor(g/count)}, ${Math.floor(b/count)})`;
+                    ctx.fillRect(x, y, pixelSize, pixelSize);
+                }
+            }
+        }
+        
+        function applyMirror() {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            ctx.save();
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            ctx.restore();
+        }
+        
+        function applyNoir(data) {
+            for (let i = 0; i < data.length; i += 4) {
+                const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                data[i] = avg;
+                data[i + 1] = avg;
+                data[i + 2] = avg;
+            }
+        }
+        
+        function applyInvert(data) {
+            for (let i = 0; i < data.length; i += 4) {
+                data[i] = 255 - data[i];
+                data[i + 1] = 255 - data[i + 1];
+                data[i + 2] = 255 - data[i + 2];
+            }
+        }
+        
+        function hslToRgb(h, s, l) {
+            s /= 100;
+            l /= 100;
+            const a = s * Math.min(l, 1 - l);
+            const f = n => {
+                const k = (n + h / 30) % 12;
+                return l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+            };
+            return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
         }
         
         function stopCamera() {
             isRunning = false;
             if (video.srcObject) {
                 video.srcObject.getTracks().forEach(t => t.stop());
-                log('⏹️ Camera stopped');
+                document.getElementById('status').textContent = '⏹️ Camera Stopped';
             }
         }
         
@@ -308,7 +310,7 @@
             currentFilter = f;
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             event.target.classList.add('active');
-            log('Filter: ' + f);
+            document.getElementById('status').textContent = `Filter: ${f} ✨`;
         }
         
         function captureImage() {
