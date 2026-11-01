@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AR Face Filter - Yoshi</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tracking.js/1.9.3/tracking.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tracking.js/1.9.3/data/face.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0"></script>
     <style>
         * {
             margin: 0;
@@ -125,6 +125,7 @@
             padding: 10px;
             background: rgba(0, 255, 0, 0.1);
             border-radius: 8px;
+            min-height: 20px;
         }
     </style>
 </head>
@@ -165,75 +166,74 @@
         let currentFilter = 'glow';
         let time = 0;
         let faces = [];
-        let tracker = null;
+        let model = null;
         
         async function startCamera() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { 
-                        width: { ideal: 640 },
-                        height: { ideal: 480 },
-                        facingMode: 'user'
-                    }
+                    video: { facingMode: 'user' }
                 });
                 
                 video.srcObject = stream;
                 video.onloadedmetadata = () => {
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
-                    document.getElementById('status').textContent = `✅ Camera Started`;
+                    document.getElementById('status').textContent = `✅ Loading model...`;
                     isRunning = true;
-                    
-                    // Wait for tracking.js to be loaded
-                    setTimeout(startTracking, 500);
+                    loadModel();
                 };
             } catch (e) {
                 document.getElementById('status').textContent = '❌ ' + e.message;
             }
         }
         
-        function startTracking() {
-            if (typeof tracking === 'undefined') {
-                document.getElementById('status').textContent = '⏳ Loading face detection...';
-                setTimeout(startTracking, 500);
-                return;
+        async function loadModel() {
+            try {
+                if (!model) {
+                    model = await blazeface.load();
+                }
+                document.getElementById('status').textContent = `✅ Ready!`;
+                detectAndDraw();
+            } catch (e) {
+                document.getElementById('status').textContent = '❌ Model error: ' + e.message;
             }
-            
-            tracker = new tracking.ObjectTracker('face');
-            tracker.setInitialScale(4);
-            tracker.setStepSize(2);
-            tracker.setEdgesDensity(0.1);
-            
-            tracking.track(video, tracker);
-            
-            tracker.on('track', function(event) {
-                faces = event.data;
-            });
-            
-            drawWithEffects();
         }
         
-        function drawWithEffects() {
+        async function detectAndDraw() {
             if (!isRunning) return;
             
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            if (currentFilter !== 'none' && faces.length > 0) {
-                faces.forEach(face => {
-                    applyFilterToFace(face.x, face.y, face.width, face.height);
-                });
+            try {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
-                document.getElementById('status').textContent = `✅ ${faces.length} face(s) | Filter: ${currentFilter}`;
-            } else if (faces.length === 0 && currentFilter !== 'none') {
-                document.getElementById('status').textContent = '👀 Looking for face...';
+                if (model) {
+                    const predictions = await model.estimateFaces(video, false);
+                    faces = predictions;
+                    
+                    if (currentFilter !== 'none' && faces.length > 0) {
+                        faces.forEach(face => {
+                            const start = face.start;
+                            const end = face.end;
+                            const x = start[0];
+                            const y = start[1];
+                            const w = end[0] - start[0];
+                            const h = end[1] - start[1];
+                            
+                            applyFilterToFace(x, y, w, h);
+                        });
+                        
+                        document.getElementById('status').textContent = `✅ ${faces.length} face(s) | ${currentFilter}`;
+                    }
+                }
+            } catch (e) {
+                console.error('Detection error:', e);
             }
             
             time++;
-            requestAnimationFrame(drawWithEffects);
+            requestAnimationFrame(detectAndDraw);
         }
         
         function applyFilterToFace(x, y, w, h) {
-            const margin = w * 0.15;
+            const margin = w * 0.2;
             const fx = Math.max(0, x - margin);
             const fy = Math.max(0, y - margin);
             const fw = Math.min(canvas.width - fx, w + margin * 2);
@@ -266,8 +266,8 @@
                     for (let py = 0; py < fh; py += pixelSize) {
                         for (let px = 0; px < fw; px += pixelSize) {
                             let r = 0, g = 0, b = 0, count = 0;
-                            for (let dy = 0; dy < pixelSize; dy++) {
-                                for (let dx = 0; dx < pixelSize; dx++) {
+                            for (let dy = 0; dy < pixelSize && py + dy < fh; dy++) {
+                                for (let dx = 0; dx < pixelSize && px + dx < fw; dx++) {
                                     const idx = ((py + dy) * fw + (px + dx)) * 4;
                                     if (idx < data.length) {
                                         r += data[idx];
@@ -277,17 +277,19 @@
                                     }
                                 }
                             }
-                            const avgR = Math.floor(r / count);
-                            const avgG = Math.floor(g / count);
-                            const avgB = Math.floor(b / count);
-                            
-                            for (let dy = 0; dy < pixelSize; dy++) {
-                                for (let dx = 0; dx < pixelSize; dx++) {
-                                    const idx = ((py + dy) * fw + (px + dx)) * 4;
-                                    if (idx < data.length) {
-                                        data[idx] = avgR;
-                                        data[idx + 1] = avgG;
-                                        data[idx + 2] = avgB;
+                            if (count > 0) {
+                                const avgR = Math.floor(r / count);
+                                const avgG = Math.floor(g / count);
+                                const avgB = Math.floor(b / count);
+                                
+                                for (let dy = 0; dy < pixelSize && py + dy < fh; dy++) {
+                                    for (let dx = 0; dx < pixelSize && px + dx < fw; dx++) {
+                                        const idx = ((py + dy) * fw + (px + dx)) * 4;
+                                        if (idx < data.length) {
+                                            data[idx] = avgR;
+                                            data[idx + 1] = avgG;
+                                            data[idx + 2] = avgB;
+                                        }
                                     }
                                 }
                             }
@@ -297,7 +299,7 @@
                     
                 case 'blur':
                     for (let i = 0; i < data.length; i += 4) {
-                        data[i + 3] = Math.max(0, data[i + 3] * 0.5);
+                        data[i + 3] = Math.max(0, data[i + 3] * 0.6);
                     }
                     break;
                     
@@ -328,7 +330,7 @@
             isRunning = false;
             if (video.srcObject) {
                 video.srcObject.getTracks().forEach(t => t.stop());
-                document.getElementById('status').textContent = '⏹️ Camera Stopped';
+                document.getElementById('status').textContent = '⏹️ Stopped';
             }
         }
         
