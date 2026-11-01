@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AR Face Filter - Yoshi</title>
-    <script src="https://cdn.jsdelivr.net/npm/tracking@0.7.3/tracking-min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/tracking@0.7.3/data/face-min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tracking.js/1.9.3/tracking.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tracking.js/1.9.3/data/face.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -165,6 +165,7 @@
         let currentFilter = 'glow';
         let time = 0;
         let faces = [];
+        let tracker = null;
         
         async function startCamera() {
             try {
@@ -182,7 +183,9 @@
                     canvas.height = video.videoHeight;
                     document.getElementById('status').textContent = `✅ Camera Started`;
                     isRunning = true;
-                    startTracking();
+                    
+                    // Wait for tracking.js to be loaded
+                    setTimeout(startTracking, 500);
                 };
             } catch (e) {
                 document.getElementById('status').textContent = '❌ ' + e.message;
@@ -190,7 +193,13 @@
         }
         
         function startTracking() {
-            const tracker = new tracking.ObjectTracker('face');
+            if (typeof tracking === 'undefined') {
+                document.getElementById('status').textContent = '⏳ Loading face detection...';
+                setTimeout(startTracking, 500);
+                return;
+            }
+            
+            tracker = new tracking.ObjectTracker('face');
             tracker.setInitialScale(4);
             tracker.setStepSize(2);
             tracker.setEdgesDensity(0.1);
@@ -214,7 +223,9 @@
                     applyFilterToFace(face.x, face.y, face.width, face.height);
                 });
                 
-                document.getElementById('status').textContent = `✅ ${faces.length} face(s) detected | Filter: ${currentFilter}`;
+                document.getElementById('status').textContent = `✅ ${faces.length} face(s) | Filter: ${currentFilter}`;
+            } else if (faces.length === 0 && currentFilter !== 'none') {
+                document.getElementById('status').textContent = '👀 Looking for face...';
             }
             
             time++;
@@ -222,7 +233,6 @@
         }
         
         function applyFilterToFace(x, y, w, h) {
-            // Add margin
             const margin = w * 0.15;
             const fx = Math.max(0, x - margin);
             const fy = Math.max(0, y - margin);
@@ -326,7 +336,6 @@
             currentFilter = f;
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             event.target.classList.add('active');
-            document.getElementById('status').textContent = `Filter: ${f} ✨`;
         }
         
         function captureImage() {
