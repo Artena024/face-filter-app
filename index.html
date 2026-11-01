@@ -170,6 +170,8 @@
         let currentFilter = 'none';
         let isRecording = false;
         let mediaRecorder = null;
+        let detections = [];
+        let animationId = null;
         
         async function initializeFaceDetection() {
             faceDetection = new FaceDetection({
@@ -184,19 +186,25 @@
         }
         
         function onFaceDetectionResults(results) {
+            detections = results.detections || [];
+        }
+        
+        function renderFrame() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            if (results.detections && results.detections.length > 0) {
-                results.detections.forEach(detection => {
+            if (detections.length > 0 && currentFilter !== 'none') {
+                detections.forEach(detection => {
                     const box = detection.boundingBox;
-                    const start = box.originX * canvas.width;
-                    const top = box.originY * canvas.height;
-                    const width = box.width * canvas.width;
-                    const height = box.height * canvas.height;
+                    const x = box.originX * canvas.width;
+                    const y = box.originY * canvas.height;
+                    const w = box.width * canvas.width;
+                    const h = box.height * canvas.height;
                     
-                    applyFilter(start, top, width, height, detection);
+                    applyFilter(x, y, w, h, detection);
                 });
             }
+            
+            animationId = requestAnimationFrame(renderFrame);
         }
         
         function applyFilter(x, y, w, h, detection) {
@@ -277,6 +285,7 @@
                 });
                 
                 camera.start();
+                renderFrame();
                 document.getElementById('status').textContent = '✅ Camera Started';
             } catch (e) {
                 document.getElementById('status').textContent = '❌ ' + e.message;
